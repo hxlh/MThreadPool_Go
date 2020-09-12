@@ -13,17 +13,17 @@ func test(args interface{}) interface{} {
 }
 func main() {
 	pool := &threadpool.ThreadPool{}
-	pool.Run(100)
-	for i := 0; i < 100; i++ {
+	pool.Run(30,100)
+	for i := 0; i < 300; i++ {
 		pool.AddTask(test, i)
 	}
-	// time.Sleep(time.Second*3)
-	go pool.Close()
-	fmt.Println("回收成功")
+	
+	pool.FriendClose()
+	fmt.Println("回收call ")
 	var str string
 	fmt.Scan(&str)
-	// fmt.Print("threadsNum=")
-	// fmt.Println(pool.Get())
-	// var str2 string
-	// fmt.Scan(&str2)
+	
+	pool.Get()
+	var str2 string
+	fmt.Scan(&str2)
 }
