@@ -8,19 +8,20 @@ import (
 
 //任务类
 type task struct {
-	ff   func(args interface{}) interface{}
+	ff   func(args interface{}, ch chan int) interface{}
 	args interface{}
 }
 
 //执行任务
-func (t *task) exec(args interface{}) {
-	t.ff(args)
+func (t *task) exec(args interface{}, chFunc chan int) {
+	t.ff(args, chFunc)
 }
 
 //ThreadPool 线程池
 type ThreadPool struct {
 	//唤醒线程的通道
-	ch chan int
+	chThread chan int
+	chFunc   chan int
 	//全局锁
 	locker *sync.RWMutex
 	//总线程数
@@ -35,7 +36,7 @@ type ThreadPool struct {
 参数一：回到函数
 参数二：回调函数的参数
 */
-func (pool *ThreadPool) AddTask(f func(args interface{}) interface{}, arg interface{}) {
+func (pool *ThreadPool) AddTask(f func(args interface{}, ch chan int) interface{}, arg interface{}) {
 	tt := task{}
 	tt.ff = f
 	tt.args = arg
@@ -43,13 +44,14 @@ func (pool *ThreadPool) AddTask(f func(args interface{}) interface{}, arg interf
 	pool.tasks = append(pool.tasks, tt)
 	pool.locker.Unlock()
 	fmt.Println("add task func call")
-	pool.ch <- 1
+	pool.chThread <- 1
 
 }
 
 //Run 运行线程池
 func (pool *ThreadPool) Run(threadNum int, taskNum int) {
-	pool.ch = make(chan int, taskNum)
+	pool.chThread = make(chan int, taskNum)
+	pool.chFunc = make(chan int, taskNum)
 	pool.shutdown = false
 	pool.threadNum = 0
 	pool.locker = new(sync.RWMutex)
@@ -64,19 +66,19 @@ func (pool *ThreadPool) Run(threadNum int, taskNum int) {
 //线程内部执行的函数
 func (pool *ThreadPool) threadRunFunc() {
 	for {
-		<-pool.ch
+		<-pool.chThread
 		pool.locker.Lock()
 		if pool.shutdown {
 			break
 		}
-		taskLen:=len(pool.tasks)
-		if taskLen<=0 {
+		taskLen := len(pool.tasks)
+		if taskLen <= 0 {
 			continue
 		}
 		first := pool.tasks[0]
 		pool.tasks = pool.tasks[1:]
 		pool.locker.Unlock()
-		first.exec(first.args)
+		first.exec(first.args, pool.chFunc)
 	}
 
 	pool.threadNum--
@@ -95,9 +97,35 @@ func (pool *ThreadPool) BadClose() {
 		pool.locker.Unlock()
 		//发送关闭信号
 		for i := 0; i < num; i++ {
-			pool.ch <- 1
+			pool.chThread <- 1
 		}
-		close(pool.ch)
+		close(pool.chThread)
+	}()
+}
+
+//BadClose2 ：立即线程池
+func (pool *ThreadPool) BadClose2() {
+	go func() {
+		pool.locker.Lock()
+
+		num := pool.threadNum
+		//清空tasks
+		pool.tasks = pool.tasks[:0:0]
+		pool.shutdown = true
+		pool.locker.Unlock()
+		//发送关闭信号
+		for i := 0; i < num; i++ {
+			//先退出任务
+			pool.chFunc <- 1
+
+		}
+		for i := 0; i < num; i++ {
+			//先退出任务
+			pool.chThread <- 1
+
+		}
+		close(pool.chThread)
+		close(pool.chFunc)
 	}()
 }
 
@@ -112,12 +140,12 @@ func (pool *ThreadPool) FriendClose() {
 			pool.locker.Unlock()
 			if taskNum <= 0 {
 				//设置结束标识符
-				pool.shutdown=true
+				pool.shutdown = true
 				//发送关闭channal
 				for i := 0; i < threadNum; i++ {
-					pool.ch <- 1
+					pool.chThread <- 1
 				}
-				close(pool.ch)
+				close(pool.chThread)
 				break
 			}
 			time.Sleep(time.Second * 1)
